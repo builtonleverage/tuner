@@ -22,12 +22,12 @@ body.ok{--c:var(--ok)}
 .tabs button{border:0;background:none;color:var(--dim);font:600 15px/1 inherit;padding:11px 18px;border-radius:999px}
 .tabs button.on{background:var(--text);color:var(--bg)}
 main{flex:1;width:100%;max-width:440px;display:flex;flex-direction:column;justify-content:center;align-items:center;min-height:0}
-.note{font-weight:700;font-size:min(38vw,30vh,190px);line-height:1;letter-spacing:-.04em;color:var(--c);transition:color .15s,opacity .3s;display:flex;align-items:flex-start}
+.note{font-weight:700;font-size:min(34vw,20vh,150px);line-height:1;letter-spacing:-.04em;color:var(--c);transition:color .15s,opacity .3s;display:flex;align-items:flex-start}
 .note sup{font-size:.32em;margin-top:.12em;color:var(--dim);font-weight:600;letter-spacing:0;min-width:.7em}
 .idle .note,.idle .hint,.idle .needle{opacity:.28}
 .hint{font-size:20px;font-weight:600;height:28px;margin-top:6px;color:var(--c);transition:color .15s,opacity .3s}
 .read{font-size:14px;color:var(--dim);font-variant-numeric:tabular-nums;height:20px;margin-top:4px}
-.meter{position:relative;width:100%;height:74px;margin-top:22px}
+.meter{position:relative;width:100%;height:74px;margin-top:14px}
 .track{position:absolute;left:0;right:0;top:30px;height:14px;border-radius:7px;background:var(--panel);
  background-image:repeating-linear-gradient(90deg,var(--line) 0 1px,transparent 1px 10%);overflow:hidden}
 .zone{position:absolute;left:45%;width:10%;top:0;bottom:0;background:var(--ok);opacity:.3}
@@ -42,6 +42,24 @@ main{flex:1;width:100%;max-width:440px;display:flex;flex-direction:column;justif
 .strings button.lock small{color:var(--bg)}
 .strings button.done::after{content:"✓";position:absolute;top:-6px;right:-4px;width:20px;height:20px;border-radius:50%;background:var(--ok);color:var(--bg);font-size:13px;line-height:20px}
 .foot{font-size:13px;color:var(--dim);height:18px;margin-top:10px;text-align:center}
+.head{width:100%;display:flex;flex-direction:column;align-items:center;margin-top:6px}
+.head svg{width:min(100%,46vh,300px);height:auto;max-height:26vh;overflow:visible}
+.head .body{fill:#2a2320;stroke:var(--line);stroke-width:2}
+.head .st{stroke:#6b6258;stroke-width:1.6;fill:none;transition:stroke .15s}
+.head .st.cur{stroke:var(--c);stroke-width:3}
+.head .shaft{stroke:var(--line);stroke-width:4;stroke-linecap:round}
+.head .knob{cursor:pointer}
+.head .knob circle.k{fill:var(--panel);stroke:var(--line);stroke-width:2.5;transition:fill .15s,stroke .15s}
+.head .knob text{fill:var(--text);font:700 13px system-ui,sans-serif;text-anchor:middle;dominant-baseline:central;pointer-events:none}
+.head .knob .ring{fill:none;stroke:var(--c);stroke-width:3;opacity:0}
+.head .knob.cur circle.k{fill:var(--c);stroke:var(--c)}
+.head .knob.cur text{fill:var(--bg)}
+.head .knob.cur .ring{opacity:1;animation:pulse 1.1s ease-in-out infinite}
+.head .knob.done:not(.cur) circle.k{stroke:var(--ok)}
+.head .knob.lock circle.k{stroke:var(--text);stroke-width:3.5}
+@keyframes pulse{0%,100%{opacity:.15}50%{opacity:1}}
+.cap{font-size:15px;font-weight:600;color:var(--text);text-align:center;min-height:20px;margin-top:2px}
+.cap b{color:var(--c)}
 #start{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:30px;text-align:center;z-index:5}
 #start button{border:0;background:var(--off);color:var(--bg);font:700 20px/1 inherit;padding:20px 40px;border-radius:999px}
 #start p{color:var(--dim);font-size:15px;max-width:300px;margin:0;line-height:1.45}
@@ -70,6 +88,7 @@ main{flex:1;width:100%;max-width:440px;display:flex;flex-direction:column;justif
     <div class="needle" id="needle"></div>
     <div class="scale"><span>♭ too low</span><span>too high ♯</span></div>
   </div>
+  <div class="head" id="headWrap"><svg id="head" viewBox="0 0 200 190" aria-label="Guitar headstock showing which tuning knob to turn"></svg><div class="cap" id="cap"></div></div>
 </main>
 
 <div class="strings" id="strings"></div>
@@ -81,6 +100,47 @@ main{flex:1;width:100%;max-width:440px;display:flex;flex-direction:column;justif
 var NAMES=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
 var MODES={guitar:[40,45,50,55,59,64],ukulele:[67,60,64,69],chromatic:null};
 var OK=5; // cents
+var LABELS={guitar:['Low E (thickest)','A','D','G','B','High E (thinnest)'],ukulele:['G','C','E','A'],chromatic:[]};
+// viewed from the front, headstock pointing up. Strings run straight from each knob to the nut.
+var LAY={
+ guitar:{nut:[85,91,97,103,109,115],left:[[0,100],[1,68],[2,36]],right:[[3,100],[4,68],[5,36]]},
+ ukulele:{nut:[88,96,104,112],left:[[0,96],[1,50]],right:[[3,96],[2,50]]}
+};
+var NS='http://www.w3.org/2000/svg';
+function el(t,a,parent){var e=document.createElementNS(NS,t);for(var k in a)e.setAttribute(k,a[k]);if(parent)parent.appendChild(e);return e}
+var knobs={}, strs={};
+function drawHead(){
+  var svg=$('head'); svg.innerHTML=''; knobs={}; strs={};
+  var L=LAY[mode]; $('headWrap').hidden=!L; if(!L) return;
+  var list=MODES[mode];
+  el('path',{'class':'body',d:'M62 22 Q62 8 76 8 L124 8 Q138 8 138 22 L138 118 L120 128 L120 190 L80 190 L80 128 L62 118 Z'},svg);
+  function place(side){
+    L[side].forEach(function(p){
+      var i=p[0],y=p[1],px=side==='left'?68:132,kx=side==='left'?36:164;
+      var nx=L.nut[i];
+      strs[i]=el('polyline',{'class':'st',points:px+','+y+' '+nx+',124 '+nx+',190'},svg);
+    });
+  }
+  place('left'); place('right');
+  ['left','right'].forEach(function(side){
+    L[side].forEach(function(p){
+      var i=p[0],y=p[1],px=side==='left'?68:132,kx=side==='left'?36:164;
+      el('line',{'class':'shaft',x1:kx,y1:y,x2:px,y2:y},svg);
+      var g=el('g',{'class':'knob'},svg);
+      el('circle',{'class':'ring',cx:kx,cy:y,r:21},g);
+      el('circle',{'class':'k',cx:kx,cy:y,r:15},g);
+      var t=el('text',{x:kx,y:y+1},g); t.textContent=NAMES[list[i]%12];
+      g.addEventListener('click',function(){lock=lock===i?-1:i;hist=[];paintStrings(-1);foot()});
+      knobs[i]=g;
+    });
+  });
+}
+function caption(cur){
+  var c=$('cap');
+  if(!LAY[mode]){c.textContent='';return}
+  if(cur<0){c.textContent='Pluck a string — its tuning knob lights up';return}
+  c.innerHTML='Turn the glowing knob · <b>'+LABELS[mode][cur]+'</b> string';
+}
 function $(i){return document.getElementById(i)}
 function mf(m){return 440*Math.pow(2,(m-69)/12)}
 function cents(f,m){return 1200*Math.log(f/mf(m))/Math.LN2}
@@ -100,19 +160,24 @@ function setMode(m){
     b.onclick=function(){lock=lock===i?-1:i; hist=[]; paintStrings(-1); foot()};
     box.appendChild(b); btns.push(b);
   });
-  foot(); idle(true);
+  drawHead(); foot(); idle(true);
 }
 function foot(){
   $('foot').textContent = mode==='chromatic' ? 'Shows whichever note it hears'
     : lock>=0 ? 'Locked to this string · tap again for auto' : 'Auto-detecting string · tap one to lock';
 }
 function paintStrings(cur){
+  for(var i in knobs){ var n=+i;
+    knobs[i].setAttribute('class','knob'+(n===cur?' cur':'')+(n===lock?' lock':'')+(done[n]?' done':''));
+    strs[i].setAttribute('class','st'+(n===cur?' cur':''));
+  }
+  if(cur>=0||!document.body.classList.contains('idle')) caption(cur);
   btns.forEach(function(b,i){b.className=(i===lock?'lock ':'')+(i===cur&&i!==lock?'cur ':'')+(done[i]?'done':'')});
 }
 function idle(reset){
   document.body.classList.add('idle'); document.body.classList.remove('ok');
   if(reset){$('name').textContent='–';$('oct').textContent='';$('read').textContent='';$('needle').style.transform='translateX(0)'}
-  $('hint').textContent='Pluck a string'; paintStrings(-1);
+  $('hint').textContent='Pluck a string'; paintStrings(-1); caption(-1);
 }
 
 function show(f){
@@ -128,12 +193,13 @@ function show(f){
   var cl=Math.max(-50,Math.min(50,c));
   $('needle').style.transform='translateX('+(cl/100*meterW)+'px)';
   var r=Math.round(c);
-  $('hint').textContent=inTune?'In tune':(c<0?'Tighten ↑':'Loosen ↓')+(Math.abs(c)>50?' a lot':'');
+  $('hint').textContent=inTune?'In tune ✓':(c<0?'Too low · tighten':'Too high · loosen');
   $('read').textContent=f.toFixed(1)+' Hz · '+(r>0?'+':'')+r+' cents';
   if(inTune){ if(!okSince) okSince=now;
     if(now-okSince>450 && !buzzed){ buzzed=true; if(idx>=0) done[idx]=true; try{navigator.vibrate&&navigator.vibrate(40)}catch(e){} }
   } else { okSince=0; buzzed=false }
   paintStrings(idx);
+  if(inTune&&idx>=0) $('cap').innerHTML='<b>Perfect</b> · stop turning';
 }
 
 function tick(){
