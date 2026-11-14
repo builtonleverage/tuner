@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Tuner</title>
+<meta name="theme-color" content="#14110f">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+:root{--bg:#14110f;--panel:#1f1b18;--line:#3a332d;--text:#f3ece2;--dim:#8f8579;--off:#f2a93b;--ok:#5fd38d;--c:var(--off)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+ display:flex;flex-direction:column;align-items:center;
+ padding:calc(env(safe-area-inset-top) + 14px) 18px calc(env(safe-area-inset-bottom) + 18px);
+ user-select:none;-webkit-user-select:none;overflow:hidden}
+body.ok{--c:var(--ok)}
+.tabs{display:flex;background:var(--panel);border-radius:999px;padding:4px;gap:2px}
+.tabs button{border:0;background:none;color:var(--dim);font:600 15px/1 inherit;padding:11px 18px;border-radius:999px}
+.tabs button.on{background:var(--text);color:var(--bg)}
+main{flex:1;width:100%;max-width:440px;display:flex;flex-direction:column;justify-content:center;align-items:center;min-height:0}
+.note{font-weight:700;font-size:min(38vw,30vh,190px);line-height:1;letter-spacing:-.04em;color:var(--c);transition:color .15s,opacity .3s;display:flex;align-items:flex-start}
+.note sup{font-size:.32em;margin-top:.12em;color:var(--dim);font-weight:600;letter-spacing:0;min-width:.7em}
+.idle .note,.idle .hint,.idle .needle{opacity:.28}
+.hint{font-size:20px;font-weight:600;height:28px;margin-top:6px;color:var(--c);transition:color .15s,opacity .3s}
+.read{font-size:14px;color:var(--dim);font-variant-numeric:tabular-nums;height:20px;margin-top:4px}
+.meter{position:relative;width:100%;height:74px;margin-top:22px}
+.track{position:absolute;left:0;right:0;top:30px;height:14px;border-radius:7px;background:var(--panel);
+ background-image:repeating-linear-gradient(90deg,var(--line) 0 1px,transparent 1px 10%);overflow:hidden}
+.zone{position:absolute;left:45%;width:10%;top:0;bottom:0;background:var(--ok);opacity:.3}
+.needle{position:absolute;top:14px;left:50%;width:4px;height:46px;margin-left:-2px;border-radius:2px;background:var(--c);
+ transition:transform .09s linear,background .15s,opacity .3s;will-change:transform}
+.scale{position:absolute;left:0;right:0;bottom:-6px;display:flex;justify-content:space-between;font-size:12px;color:var(--dim)}
+.strings{display:flex;gap:8px;justify-content:center;min-height:64px;margin-top:8px}
+.strings button{position:relative;width:min(54px,13.5vw);height:min(54px,13.5vw);border-radius:50%;border:2px solid var(--line);background:none;color:var(--text);font:700 18px/1 inherit}
+.strings button small{font-size:11px;font-weight:600;color:var(--dim)}
+.strings button.cur{border-color:var(--c);color:var(--c)}
+.strings button.lock{background:var(--text);color:var(--bg);border-color:var(--text)}
+.strings button.lock small{color:var(--bg)}
+.strings button.done::after{content:"✓";position:absolute;top:-6px;right:-4px;width:20px;height:20px;border-radius:50%;background:var(--ok);color:var(--bg);font-size:13px;line-height:20px}
+.foot{font-size:13px;color:var(--dim);height:18px;margin-top:10px;text-align:center}
+#start{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:30px;text-align:center;z-index:5}
+#start button{border:0;background:var(--off);color:var(--bg);font:700 20px/1 inherit;padding:20px 40px;border-radius:999px}
+#start p{color:var(--dim);font-size:15px;max-width:300px;margin:0;line-height:1.45}
+#start .err{color:#ff8a70}
+[hidden]{display:none!important}
+</style>
+</head>
+<body class="idle">
+<div id="start">
+  <button id="go">Start tuning</button>
+  <p id="msg">Uses your microphone to hear the string. Nothing is recorded or sent anywhere.</p>
+</div>
+
+<div class="tabs" id="tabs">
+  <button data-m="guitar">Guitar</button>
+  <button data-m="ukulele">Ukulele</button>
+  <button data-m="chromatic">Any note</button>
+</div>
+
+<main>
+  <div class="note"><span id="name">–</span><sup id="oct"></sup></div>
+  <div class="hint" id="hint">Pluck a string</div>
+  <div class="read" id="read"></div>
+  <div class="meter">
+    <div class="track"><div class="zone"></div></div>
+    <div class="needle" id="needle"></div>
+    <div class="scale"><span>♭ too low</span><span>too high ♯</span></div>
+  </div>
+</main>
+
+<div class="strings" id="strings"></div>
+<div class="foot" id="foot"></div>
+
+<script src="./pitch.js"></script>
+<script>
+(function(){
+var NAMES=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
+var MODES={guitar:[40,45,50,55,59,64],ukulele:[67,60,64,69],chromatic:null};
+var OK=5; // cents
+function $(i){return document.getElementById(i)}
+function mf(m){return 440*Math.pow(2,(m-69)/12)}
+function cents(f,m){return 1200*Math.log(f/mf(m))/Math.LN2}
+function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
+
+var mode=store('mode'); if(!(mode in MODES)) mode='guitar';
+var lock=-1, done={}, hist=[], lastHeard=0, okSince=0, buzzed=false, btns=[];
+var ctx, analyser, buf, running=false, meterW=0;
+
+function setMode(m){
+  mode=m; store('mode',m); lock=-1; done={}; hist=[];
+  [].forEach.call($('tabs').children,function(b){b.className=b.dataset.m===m?'on':''});
+  var box=$('strings'); box.innerHTML=''; btns=[];
+  (MODES[m]||[]).forEach(function(midi,i){
+    var b=document.createElement('button');
+    b.innerHTML=NAMES[midi%12]+'<small>'+(Math.floor(midi/12)-1)+'</small>';
+    b.onclick=function(){lock=lock===i?-1:i; hist=[]; paintStrings(-1); foot()};
+    box.appendChild(b); btns.push(b);
+  });
+  foot(); idle(true);
+}
+function foot(){
+  $('foot').textContent = mode==='chromatic' ? 'Shows whichever note it hears'
+    : lock>=0 ? 'Locked to this string · tap again for auto' : 'Auto-detecting string · tap one to lock';
+}
+function paintStrings(cur){
+  btns.forEach(function(b,i){b.className=(i===lock?'lock ':'')+(i===cur&&i!==lock?'cur ':'')+(done[i]?'done':'')});
+}
+function idle(reset){
+  document.body.classList.add('idle'); document.body.classList.remove('ok');
+  if(reset){$('name').textContent='–';$('oct').textContent='';$('read').textContent='';$('needle').style.transform='translateX(0)'}
+  $('hint').textContent='Pluck a string'; paintStrings(-1);
+}
+
+function show(f){
+  var list=MODES[mode], midi, idx=-1, c;
+  if(!list){ midi=Math.round(69+12*Math.log(f/440)/Math.LN2); c=cents(f,midi); }
+  else if(lock>=0){ idx=lock; midi=list[idx]; c=cents(f,midi);
+    while(c>600){c-=1200} while(c<-600){c+=1200} }   // ignore octave slips when locked
+  else { var best=1e9; list.forEach(function(m,i){var d=Math.abs(cents(f,m)); if(d<best){best=d;idx=i}}); midi=list[idx]; c=cents(f,midi); }
+
+  var inTune=Math.abs(c)<=OK, now=performance.now();
+  document.body.classList.remove('idle'); document.body.classList.toggle('ok',inTune);
+  $('name').textContent=NAMES[midi%12]; $('oct').textContent=Math.floor(midi/12)-1;
+  var cl=Math.max(-50,Math.min(50,c));
+  $('needle').style.transform='translateX('+(cl/100*meterW)+'px)';
+  var r=Math.round(c);
+  $('hint').textContent=inTune?'In tune':(c<0?'Tighten ↑':'Loosen ↓')+(Math.abs(c)>50?' a lot':'');
+  $('read').textContent=f.toFixed(1)+' Hz · '+(r>0?'+':'')+r+' cents';
+  if(inTune){ if(!okSince) okSince=now;
+    if(now-okSince>450 && !buzzed){ buzzed=true; if(idx>=0) done[idx]=true; try{navigator.vibrate&&navigator.vibrate(40)}catch(e){} }
+  } else { okSince=0; buzzed=false }
+  paintStrings(idx);
+}
+
+function tick(){
+  if(!running) return;
+  requestAnimationFrame(tick);
+  analyser.getFloatTimeDomainData(buf);
+  var r=detectPitch(buf,ctx.sampleRate), now=performance.now();
+  if(r && r.clarity>0.8 && r.freq>60 && r.freq<1400){
+    if(hist.length){ var med=median(hist); if(Math.abs(1200*Math.log(r.freq/med)/Math.LN2)>60) hist=[]; }
+    hist.push(r.freq); if(hist.length>7) hist.shift();
+    lastHeard=now;
+    if(hist.length>=3) show(median(hist));
+  } else if(now-lastHeard>1500 && !document.body.classList.contains('idle')){ hist=[]; okSince=0; buzzed=false; idle(false); }
+}
+function median(a){var s=a.slice().sort(function(x,y){return x-y});return s[s.length>>1]}
+
+function start(){
+  $('msg').className=''; $('msg').textContent='Asking for the microphone…';
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){fail('This browser can\'t reach the microphone here. Open the app over https in Chrome or Safari.');return}
+  navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:1}}).then(function(stream){
+    ctx=new (window.AudioContext||window.webkitAudioContext)();
+    var src=ctx.createMediaStreamSource(stream);
+    analyser=ctx.createAnalyser(); analyser.fftSize=4096; analyser.smoothingTimeConstant=0;
+    src.connect(analyser); buf=new Float32Array(analyser.fftSize);
+    if(ctx.state==='suspended') ctx.resume();
+    $('start').hidden=true; running=true; measure(); tick(); wake();
+  }).catch(function(e){
+    fail(e&&e.name==='NotAllowedError'?'Microphone access was blocked. Allow it in your browser\'s site settings, then try again.':'Couldn\'t open the microphone ('+(e&&e.name||'error')+').');
+  });
+}
+function fail(t){$('msg').className='err';$('msg').textContent=t}
+var wl=null;
+function wake(){ if(navigator.wakeLock) navigator.wakeLock.request('screen').then(function(l){wl=l}).catch(function(){}) }
+function measure(){meterW=document.querySelector('.meter').clientWidth}
+
+document.addEventListener('visibilitychange',function(){
+  if(!ctx) return;
+  if(document.hidden){running=false}
+  else{ if(ctx.state!=='running') ctx.resume(); if(!running){running=true;tick()} wake(); }
+});
+window.addEventListener('resize',measure);
+$('go').onclick=start;
+[].forEach.call($('tabs').children,function(b){b.onclick=function(){setMode(b.dataset.m)}});
+setMode(mode); measure();
+if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(function(){});
+})();
+</script>
+</body>
+</html>
